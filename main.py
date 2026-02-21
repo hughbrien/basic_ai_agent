@@ -359,8 +359,16 @@ def main():
             result: Dict[str, Any] = agent.invoke(payload, config={"callbacks": callbacks})
             latency = time.time() - start
 
-            # Agents return dict with "output"
+            # Agents return dict with "output".
+            # create_tool_calling_agent may return a list of content blocks
+            # (e.g. [{'type': 'text', 'text': '...', 'index': 0}]) instead of a plain string.
             text = result.get("output", str(result))
+            if isinstance(text, list):
+                text = "\n".join(
+                    block.get("text", str(block)) if isinstance(block, dict) else str(block)
+                    for block in text
+                    if not isinstance(block, dict) or block.get("type") == "text"
+                )
 
             # Persist AI message
             history.add_message(AIMessage(content=text))
