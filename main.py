@@ -190,7 +190,7 @@ def build_agent(llm, tools: List[Tool]) -> AgentExecutor:
 # --------------------------
 def get_history(session_id: str) -> SQLChatMessageHistory:
     conn = "sqlite:///chat_history.db"
-    return SQLChatMessageHistory(connection_string=conn, session_id=session_id)
+    return SQLChatMessageHistory(connection=conn, session_id=session_id)
 
 
 def init_response_cache(path: str = ".langchain_cache.db"):
