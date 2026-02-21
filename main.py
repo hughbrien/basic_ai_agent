@@ -46,6 +46,14 @@ try:
 except Exception:
     HAS_TAVILY = False
 
+# Optional Traceloop OpenTelemetry instrumentation
+try:
+    from traceloop.sdk import Traceloop
+    from traceloop.sdk.decorators import workflow as traceloop_workflow
+    HAS_TRACELOOP = True
+except ImportError:
+    HAS_TRACELOOP = False
+
 
 # --------------------------
 # Configuration & Providers
@@ -311,12 +319,60 @@ def check_env(provider: str):
         raise RuntimeError(f"Missing environment variables for {provider}: {', '.join(missing)}")
 
 
+def _traceloop_init(provider: str, model: str) -> bool:
+    """Initialize Traceloop OpenTelemetry instrumentation. Returns True if successful."""
+    if not HAS_TRACELOOP:
+        return False
+    try:
+        kwargs: Dict[str, Any] = {"app_name": f"chatbox-{provider}-{model}"}
+        api_key = os.getenv("TRACELOOP_API_KEY")
+        if api_key:
+            kwargs["api_key"] = api_key
+        api_endpoint = os.getenv("TRACELOOP_BASE_URL")
+        if api_endpoint:
+            kwargs["api_endpoint"] = api_endpoint
+        Traceloop.init(**kwargs)
+        return True
+    except Exception as exc:
+        print(f"[Traceloop] Instrumentation disabled: {exc}")
+        return False
+
+
+def _run_chat_turn(agent, history, callbacks, user_input, provider, model):
+    """Execute a single chat turn: persist input, invoke agent, display response."""
+    history.add_message(HumanMessage(content=user_input))
+    payload = {
+        "input": user_input,
+        "chat_history": history.messages,
+    }
+    start = time.time()
+    result: Dict[str, Any] = agent.invoke(payload, config={"callbacks": callbacks})
+    latency = time.time() - start
+    text = result.get("output", str(result))
+    if isinstance(text, list):
+        text = "\n".join(
+            block.get("text", str(block)) if isinstance(block, dict) else str(block)
+            for block in text
+            if not isinstance(block, dict) or block.get("type") == "text"
+        )
+    history.add_message(AIMessage(content=text))
+    print(f"\nAssistant ({provider}/{model} | {latency:.2f}s):\n{text}\n")
+
+
 def main():
     args = parse_args()
     # Apply provider-specific default model if --model / CHATBOX_MODEL not set
     if not args.model:
         args.model = DEFAULT_MODELS.get(args.provider, "llama3:latest")
     check_env(args.provider)
+
+    # Traceloop OpenTelemetry instrumentation (no-op if SDK absent or config invalid)
+    traceloop_enabled = _traceloop_init(args.provider, args.model)
+    chat_turn = (
+        traceloop_workflow(name="chat_turn")(_run_chat_turn)
+        if traceloop_enabled
+        else _run_chat_turn
+    )
 
     # Response cache (persists across runs)
     init_response_cache(".langchain_cache.db")
@@ -345,35 +401,7 @@ def main():
             user_input = input("You: ").strip()
             if not user_input:
                 continue
-
-            # Persist human message
-            history.add_message(HumanMessage(content=user_input))
-
-            payload = {
-                "input": user_input,
-                "chat_history": history.messages,  # MUST be list[BaseMessage]
-                # agent_scratchpad is injected by the agent; do not set it here
-            }
-
-            start = time.time()
-            result: Dict[str, Any] = agent.invoke(payload, config={"callbacks": callbacks})
-            latency = time.time() - start
-
-            # Agents return dict with "output".
-            # create_tool_calling_agent may return a list of content blocks
-            # (e.g. [{'type': 'text', 'text': '...', 'index': 0}]) instead of a plain string.
-            text = result.get("output", str(result))
-            if isinstance(text, list):
-                text = "\n".join(
-                    block.get("text", str(block)) if isinstance(block, dict) else str(block)
-                    for block in text
-                    if not isinstance(block, dict) or block.get("type") == "text"
-                )
-
-            # Persist AI message
-            history.add_message(AIMessage(content=text))
-
-            print(f"\nAssistant ({args.provider}/{args.model} | {latency:.2f}s):\n{text}\n")
+            chat_turn(agent, history, callbacks, user_input, args.provider, args.model)
 
     except KeyboardInterrupt:
         print("\nExiting. Bye!")
