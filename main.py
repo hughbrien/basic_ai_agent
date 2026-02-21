@@ -182,7 +182,7 @@ def build_agent(llm, tools: List[Tool]) -> AgentExecutor:
     ])
 
     agent = create_react_agent(llm=llm, tools=tools, prompt=prompt)
-    return AgentExecutor(agent=agent, tools=tools, verbose=False)
+    return AgentExecutor(agent=agent, tools=tools, verbose=False, handle_parsing_errors=True)
 
 
 # --------------------------
