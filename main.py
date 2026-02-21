@@ -27,7 +27,7 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.tools import Tool
 from langchain_core.callbacks import BaseCallbackHandler
 
-from langchain.agents import AgentExecutor, create_react_agent
+from langchain.agents import AgentExecutor, create_tool_calling_agent
 from langchain.tools import tool
 
 # Persistent chat history (community in 0.2.x+)
@@ -163,25 +163,23 @@ def build_tools() -> List[Tool]:
 # --------------------------
 def build_agent(llm, tools: List[Tool]) -> AgentExecutor:
     """
-    ReAct agent for LangChain 0.2.x+:
-    - MUST include {tools} and {tool_names} in the prompt.
-    - For agent_scratchpad, use a STRING placeholder rendered as an AI message (create_react_agent injects a string).
+    Tool-calling agent for LangChain 0.2.x+:
+    Uses the model's native tool-calling API instead of text-based ReAct parsing,
+    which is more reliable for modern models like Claude and GPT-4.
     """
     system_text = (
         "You are ChatBox, an enterprise-ready assistant.\n"
-        "Be concise, correct, and use tools when helpful.\n\n"
-        "Available tools:\n{tools}\n\n"
-        "Tool names:\n{tool_names}"
+        "Be concise, correct, and use tools when helpful."
     )
 
     prompt = ChatPromptTemplate.from_messages([
         ("system", system_text),
-        MessagesPlaceholder(variable_name="chat_history"),  # list[BaseMessage]
+        MessagesPlaceholder(variable_name="chat_history"),
         ("human", "{input}"),
-        ("ai", "{agent_scratchpad}"),                      # string scratchpad
+        MessagesPlaceholder(variable_name="agent_scratchpad"),  # list[BaseMessage]
     ])
 
-    agent = create_react_agent(llm=llm, tools=tools, prompt=prompt)
+    agent = create_tool_calling_agent(llm=llm, tools=tools, prompt=prompt)
     return AgentExecutor(agent=agent, tools=tools, verbose=False)
 
 
