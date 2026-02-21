@@ -269,6 +269,15 @@ class AuditLogger(BaseCallbackHandler):
 # --------------------------
 # CLI & Main
 # --------------------------
+DEFAULT_MODELS = {
+    "openai": "gpt-4o-mini",
+    "anthropic": "claude-sonnet-4-6",
+    "groq": "llama-3.1-70b-versatile",
+    "ollama": "llama3:latest",
+    "grok": "grok-2",
+}
+
+
 def parse_args():
     p = argparse.ArgumentParser(description="LangChain ChatBox")
     p.add_argument(
@@ -279,8 +288,8 @@ def parse_args():
     )
     p.add_argument(
         "--model",
-        default=os.getenv("CHATBOX_MODEL", "llama3:latest"),
-        help="Model name (default from CHATBOX_MODEL env or 'llama3:latest')",
+        default=os.getenv("CHATBOX_MODEL"),
+        help="Model name (default: provider-specific; see DEFAULT_MODELS)",
     )
     p.add_argument("--session", default=os.getenv("CHATBOX_SESSION", "default"))
     p.add_argument("--temperature", type=float, default=float(os.getenv("CHATBOX_TEMPERATURE", 0.2)))
@@ -306,6 +315,9 @@ def check_env(provider: str):
 
 def main():
     args = parse_args()
+    # Apply provider-specific default model if --model / CHATBOX_MODEL not set
+    if not args.model:
+        args.model = DEFAULT_MODELS.get(args.provider, "llama3:latest")
     check_env(args.provider)
 
     # Response cache (persists across runs)
