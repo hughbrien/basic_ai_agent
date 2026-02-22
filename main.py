@@ -312,12 +312,44 @@ def check_env(provider: str):
 
 
 def _extract_text(raw: Any) -> str:
-    """Return plain text from agent output, stripping any JSON wrapper.
+    """Return plain text from agent output, stripping any JSON/list wrapper.
 
-    Some providers/agents return a JSON string (e.g. ``{"output": "Hi!"}``
-    or a list of content blocks) instead of bare text.  This helper unwraps
-    those cases so the terminal always sees readable prose.
+    Anthropic (and some other providers) return a list of content blocks
+    such as ``[{'type': 'text', 'text': '...', 'index': 0}]`` instead of a
+    plain string.  This helper handles Python lists/dicts directly as well
+    as JSON-encoded strings.
     """
+    # --- Native Python list of content blocks (e.g. Anthropic streaming) ---
+    if isinstance(raw, list):
+        parts = []
+        for item in raw:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict):
+                t = item.get("text") or item.get("content") or item.get("output") or ""
+                if t:
+                    parts.append(str(t))
+        return "\n".join(parts) if parts else str(raw)
+
+    # --- Native Python dict ---
+    if isinstance(raw, dict):
+        for key in ("output", "content", "text", "answer", "response", "message"):
+            value = raw.get(key)
+            if isinstance(value, str) and value.strip():
+                return value
+        # Content block list inside a dict
+        value = raw.get("content")
+        if isinstance(value, list):
+            parts = [
+                b.get("text", "") for b in value
+                if isinstance(b, dict) and b.get("type") == "text"
+            ]
+            joined = "\n".join(p for p in parts if p)
+            if joined:
+                return joined
+        return str(raw)
+
+    # --- String: return as-is unless it looks like JSON ---
     if not isinstance(raw, str):
         return str(raw)
     stripped = raw.strip()
@@ -327,38 +359,8 @@ def _extract_text(raw: Any) -> str:
         parsed = json.loads(stripped)
     except (json.JSONDecodeError, ValueError):
         return raw  # not valid JSON – return as-is
-    # Dict: look for common "text" keys in order of preference
-    if isinstance(parsed, dict):
-        for key in ("output", "content", "text", "answer", "response", "message"):
-            value = parsed.get(key)
-            if isinstance(value, str) and value.strip():
-                return value
-        # Nested list of content blocks (e.g. Anthropic-style)
-        for key in ("content",):
-            value = parsed.get(key)
-            if isinstance(value, list):
-                parts = [
-                    b.get("text", "") for b in value
-                    if isinstance(b, dict) and b.get("type") == "text"
-                ]
-                joined = "\n".join(p for p in parts if p)
-                if joined:
-                    return joined
-        # Nothing useful found – fall back to the original string
-        return raw
-    # List of content blocks
-    if isinstance(parsed, list):
-        parts = []
-        for item in parsed:
-            if isinstance(item, str):
-                parts.append(item)
-            elif isinstance(item, dict):
-                t = item.get("text") or item.get("content") or item.get("output") or ""
-                if t:
-                    parts.append(str(t))
-        joined = "\n".join(parts)
-        return joined if joined else raw
-    return raw
+    # Recurse now that we have a real Python object
+    return _extract_text(parsed)
 
 
 def main():
