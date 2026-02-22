@@ -2,3 +2,5 @@
 /env
 .venv
 otel-config.yaml
+combined-all.log
+./logs/llm_requests.jsonl
