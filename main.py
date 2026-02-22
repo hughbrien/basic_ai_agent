@@ -311,6 +311,56 @@ def check_env(provider: str):
         raise RuntimeError(f"Missing environment variables for {provider}: {', '.join(missing)}")
 
 
+def _extract_text(raw: Any) -> str:
+    """Return plain text from agent output, stripping any JSON wrapper.
+
+    Some providers/agents return a JSON string (e.g. ``{"output": "Hi!"}``
+    or a list of content blocks) instead of bare text.  This helper unwraps
+    those cases so the terminal always sees readable prose.
+    """
+    if not isinstance(raw, str):
+        return str(raw)
+    stripped = raw.strip()
+    if not stripped.startswith(("{", "[")):
+        return raw  # fast path: already plain text
+    try:
+        parsed = json.loads(stripped)
+    except (json.JSONDecodeError, ValueError):
+        return raw  # not valid JSON – return as-is
+    # Dict: look for common "text" keys in order of preference
+    if isinstance(parsed, dict):
+        for key in ("output", "content", "text", "answer", "response", "message"):
+            value = parsed.get(key)
+            if isinstance(value, str) and value.strip():
+                return value
+        # Nested list of content blocks (e.g. Anthropic-style)
+        for key in ("content",):
+            value = parsed.get(key)
+            if isinstance(value, list):
+                parts = [
+                    b.get("text", "") for b in value
+                    if isinstance(b, dict) and b.get("type") == "text"
+                ]
+                joined = "\n".join(p for p in parts if p)
+                if joined:
+                    return joined
+        # Nothing useful found – fall back to the original string
+        return raw
+    # List of content blocks
+    if isinstance(parsed, list):
+        parts = []
+        for item in parsed:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict):
+                t = item.get("text") or item.get("content") or item.get("output") or ""
+                if t:
+                    parts.append(str(t))
+        joined = "\n".join(parts)
+        return joined if joined else raw
+    return raw
+
+
 def main():
     args = parse_args()
     # Apply provider-specific default model if --model / CHATBOX_MODEL not set
@@ -359,8 +409,9 @@ def main():
             result: Dict[str, Any] = agent.invoke(payload, config={"callbacks": callbacks})
             latency = time.time() - start
 
-            # Agents return dict with "output"
-            text = result.get("output", str(result))
+            # Agents return dict with "output"; unwrap any JSON wrapper
+            raw = result.get("output", str(result))
+            text = _extract_text(raw)
 
             # Persist AI message
             history.add_message(AIMessage(content=text))
