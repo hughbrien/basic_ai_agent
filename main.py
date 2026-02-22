@@ -47,6 +47,22 @@ except Exception:
     HAS_TAVILY = False
 
 
+print ("Initializing Traceloop...")
+from traceloop.sdk import Traceloop
+
+OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+OTEL_URL = os.getenv("OTEL_URL")
+OTEL_TOKEN = os.getenv("OTEL_TOKEN", "XYZ")
+
+
+Traceloop.init(
+    app_name="basic-ai-agent",
+    api_endpoint="http://localhost:4318",
+    headers={"Authorization": "Api-Token " + OTEL_TOKEN },
+    disable_batch=True
+)
+print ("Finished Initializing Tracelook...")
+
 # --------------------------
 # Configuration & Providers
 # --------------------------
@@ -218,6 +234,7 @@ class AuditLogger(BaseCallbackHandler):
             "prompts": prompts,
             "invocation_params": kwargs.get("invocation_params", {}),
         }
+
         self._tools_used = []
 
     def on_llm_end(self, response, **kwargs):
