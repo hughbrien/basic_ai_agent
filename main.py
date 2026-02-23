@@ -19,6 +19,7 @@ import os
 import time
 import json
 import argparse
+import requests
 from pathlib import Path
 from dataclasses import dataclass
 from typing import Dict, Any, List
@@ -29,8 +30,9 @@ from langchain_community.cache import SQLiteCache
 
 from langchain_core.messages import HumanMessage, AIMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_core.tools import Tool
+from langchain_core.tools import Tool, StructuredTool
 from langchain_core.callbacks import BaseCallbackHandler
+from pydantic import BaseModel, Field
 
 from langchain.agents import AgentExecutor, create_tool_calling_agent, create_react_agent
 from langchain import hub
@@ -193,8 +195,105 @@ calculator = Tool(
 )
 
 
+# --------------------------
+# Weather tool (Open-Meteo — free, no API key required)
+# --------------------------
+# WMO weather interpretation codes → human-readable descriptions
+_WMO_CODES: Dict[int, str] = {
+    0: "Clear sky", 1: "Mainly clear", 2: "Partly cloudy", 3: "Overcast",
+    45: "Fog", 48: "Icy fog",
+    51: "Light drizzle", 53: "Drizzle", 55: "Heavy drizzle",
+    61: "Light rain", 63: "Rain", 65: "Heavy rain",
+    71: "Light snow", 73: "Snow", 75: "Heavy snow", 77: "Snow grains",
+    80: "Light showers", 81: "Showers", 82: "Heavy showers",
+    85: "Snow showers", 86: "Heavy snow showers",
+    95: "Thunderstorm", 96: "Thunderstorm with hail", 99: "Thunderstorm with heavy hail",
+}
+
+
+class WeatherInput(BaseModel):
+    location: str = Field(
+        description="City name with optional state/country, e.g. 'Bradenton FL' or 'Paris, France'"
+    )
+
+
+def _get_weather(location: str) -> str:
+    """Return current weather conditions for *location* using Open-Meteo."""
+    try:
+        # 1. Geocode the location name → lat/lon
+        geo_resp = requests.get(
+            "https://geocoding-api.open-meteo.com/v1/search",
+            params={"name": location, "count": 1, "language": "en", "format": "json"},
+            timeout=10,
+        )
+        geo_resp.raise_for_status()
+        geo_data = geo_resp.json()
+
+        if not geo_data.get("results"):
+            return f"Could not find location: {location}"
+
+        place = geo_data["results"][0]
+        lat = place["latitude"]
+        lon = place["longitude"]
+        city = place.get("name", location)
+        state = place.get("admin1", "")
+        country = place.get("country", "")
+        display = f"{city}, {state}" if state else city
+        if country:
+            display += f", {country}"
+
+        # 2. Fetch current conditions
+        wx_resp = requests.get(
+            "https://api.open-meteo.com/v1/forecast",
+            params={
+                "latitude": lat,
+                "longitude": lon,
+                "current": [
+                    "temperature_2m",
+                    "relative_humidity_2m",
+                    "apparent_temperature",
+                    "weather_code",
+                    "wind_speed_10m",
+                    "wind_direction_10m",
+                ],
+                "temperature_unit": "fahrenheit",
+                "wind_speed_unit": "mph",
+                "timezone": "auto",
+            },
+            timeout=10,
+        )
+        wx_resp.raise_for_status()
+        current = wx_resp.json().get("current", {})
+
+        wmo = current.get("weather_code", 0)
+        condition = _WMO_CODES.get(wmo, f"Weather code {wmo}")
+
+        return (
+            f"Current weather for {display}:\n"
+            f"  Condition:   {condition}\n"
+            f"  Temperature: {current.get('temperature_2m', 'N/A')}°F"
+            f" (feels like {current.get('apparent_temperature', 'N/A')}°F)\n"
+            f"  Humidity:    {current.get('relative_humidity_2m', 'N/A')}%\n"
+            f"  Wind:        {current.get('wind_speed_10m', 'N/A')} mph"
+        )
+    except Exception as exc:
+        return f"Error fetching weather: {exc}"
+
+
+weather_tool = StructuredTool.from_function(
+    func=_get_weather,
+    name="get_weather",
+    description=(
+        "Get current weather conditions for any city or location. "
+        "Use this for any weather-related questions. "
+        "Input: location name such as 'Bradenton FL', 'New York', or 'London UK'."
+    ),
+    args_schema=WeatherInput,
+)
+
+
 def build_tools() -> List[Tool]:
-    tools: List[Tool] = [calculator]
+    tools: List[Tool] = [calculator, weather_tool]
     if HAS_TAVILY and os.getenv("TAVILY_API_KEY"):
         tools.append(TavilySearchResults(max_results=3))
     return tools
