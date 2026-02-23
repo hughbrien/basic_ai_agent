@@ -1,10 +1,16 @@
 # LangChain 0.3.x ecosystem — all packages must be on compatible versions.
 # langchain-core 0.3+ uses pydantic v2 natively and removed the
 # pydantic_v1 compatibility shim that existed in 0.2.x.
+#
+# Minimum versions are pinned to 0.3.7+ because early 0.3.x releases had
+# incomplete pydantic v2 migrations: agent classes like LLMSingleActionAgent
+# still used pydantic v1 base classes while LLMChain had already been migrated
+# to v2, causing "Mixing V1 and V2 models is not supported" RuntimeErrors.
+# By 0.3.7 the pydantic v2 migration across all agent/chain classes was complete.
 
-langchain>=0.3.0,<0.4.0
-langchain-core>=0.3.0,<0.4.0
-langchain-community>=0.3.0,<0.4.0
+langchain>=0.3.7,<0.4.0
+langchain-core>=0.3.15,<0.4.0
+langchain-community>=0.3.7,<0.4.0
 
 # Provider integrations
 langchain-openai>=0.2.0,<0.3.0
