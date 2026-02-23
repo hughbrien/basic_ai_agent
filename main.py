@@ -284,8 +284,9 @@ weather_tool = StructuredTool.from_function(
     func=_get_weather,
     name="get_weather",
     description=(
-        "Get current weather conditions for any city or location. "
-        "Use this for any weather-related questions. "
+        "Get current weather conditions for a specific city or location. "
+        "ONLY use this when the user explicitly asks for weather information for a specific place. "
+        "Examples: 'What is the weather in New York?' or 'Tell me the weather for Paris'. "
         "Input: location name such as 'Bradenton FL', 'New York', or 'London UK'."
     ),
     args_schema=WeatherInput,
@@ -311,7 +312,8 @@ def build_agent(llm, tools: List[Tool]) -> AgentExecutor:
     """
     system_text = (
         "You are ChatBox, an enterprise-ready assistant.\n"
-        "Be concise, correct, and use tools when helpful."
+        "Be concise and correct. Only use tools when explicitly needed to answer the user's question.\n"
+        "For greetings, simple messages, or general conversation, respond directly without tools."
     )
 
     try:
