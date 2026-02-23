@@ -160,8 +160,6 @@ def _calculator(expr: str) -> str:
     }
 
     def eval_node(node):
-        if isinstance(node, ast.Num):  # Py<3.8
-            return node.n
         if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
             return node.value
         if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub):
