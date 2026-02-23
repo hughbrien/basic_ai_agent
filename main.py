@@ -1,13 +1,18 @@
 
 #!/usr/bin/env python3
 """
-ChatBox (LangChain 0.2.x+)
+ChatBox (LangChain 0.3.x+)
 
 Providers: OpenAI, Anthropic, Groq, Ollama (Llama3), Grok (xAI via OpenAI-compatible endpoint)
 Tools: Calculator (safe AST), optional TavilySearch (if TAVILY_API_KEY is set)
 Persistence: SQLite chat history (per session_id) + SQLite response cache
 Audit: JSONL per-request metadata (provider, model, prompts, latency, token usage when available, tool calls)
 CLI: Sensible defaults; override via env or CLI flags
+
+Requires: see requirements.txt — all langchain-* packages must be on the 0.3.x
+branch together. Mixing 0.2.x langchain with 0.3.x langchain-core causes a
+`ModuleNotFoundError: No module named 'langchain_core.pydantic_v1'` because
+the pydantic v1 shim was removed in langchain-core 0.3.
 """
 
 import os
@@ -18,7 +23,7 @@ from pathlib import Path
 from dataclasses import dataclass
 from typing import Dict, Any, List
 
-# -------- LangChain core (0.2.x+) --------
+# -------- LangChain core (0.3.x+) --------
 from langchain.globals import set_llm_cache
 from langchain_community.cache import SQLiteCache
 
@@ -180,7 +185,7 @@ def build_tools() -> List[Tool]:
 # --------------------------
 def build_agent(llm, tools: List[Tool]) -> AgentExecutor:
     """
-    Tool-calling agent for LangChain 0.2.x+:
+    Tool-calling agent for LangChain 0.3.x+:
     Uses the model's native tool-calling API when supported; falls back to
     ReAct (text-based) agent for models that don't implement bind_tools
     (e.g. older Ollama models).
