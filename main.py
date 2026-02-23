@@ -59,7 +59,7 @@ Traceloop.init(
     app_name="basic-ai-agent",
     api_endpoint="http://localhost:4318",
     headers={"Authorization": "Api-Token " + OTEL_TOKEN },
-    disable_batch=True
+    disable_batch = False
 )
 print ("Finished Initializing Tracelook...")
 
