@@ -34,7 +34,6 @@ from langchain_core.callbacks import BaseCallbackHandler
 
 from langchain.agents import AgentExecutor, create_tool_calling_agent, create_react_agent
 from langchain import hub
-from langchain.tools import tool
 
 # Persistent chat history (community in 0.2.x+)
 from langchain_community.chat_message_histories import SQLChatMessageHistory
@@ -139,11 +138,18 @@ def make_llm(cfg: ProviderConfig):
 # --------------------------
 # Tools
 # --------------------------
-@tool("calculator", return_direct=False)
-def calculator(expr: str) -> str:
+def _calculator(expr: str) -> str:
     """Evaluate a safe arithmetic expression (supports +, -, *, /, **, (), floats)."""
     import ast
     import operator as op
+
+    # Ollama and some other models may pass a JSON-schema dict instead of a
+    # plain string (e.g. {'type': 'string'}).  Extract the nested 'expr' key
+    # when that happens so the tool degrades gracefully rather than crashing.
+    if isinstance(expr, dict):
+        expr = expr.get("expr", "")
+    if not isinstance(expr, str) or not expr.strip():
+        return "Error: expected a math expression string, e.g. '2 + 2'"
 
     OPS = {
         ast.Add: op.add,
@@ -171,6 +177,22 @@ def calculator(expr: str) -> str:
         return str(eval_node(tree.body))
     except Exception as e:
         return f"Error: {e}"
+
+
+# Wrap in a plain Tool (not the @tool / StructuredTool decorator) so that
+# LangChain passes the model's raw string directly to _calculator without
+# going through Pydantic schema validation.  This avoids the
+# "Input should be a valid string [input_value={'type': 'string'}]" crash
+# that occurs when some LLMs (e.g. Ollama llama3) echo the JSON-schema
+# definition back as the argument value instead of the actual expression.
+calculator = Tool(
+    name="calculator",
+    func=_calculator,
+    description=(
+        "Evaluate a safe arithmetic expression. "
+        "Input must be a math expression string, e.g. '2 + 2' or '(10 * 5) / 2'."
+    ),
+)
 
 
 def build_tools() -> List[Tool]:
