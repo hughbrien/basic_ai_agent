@@ -27,7 +27,8 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.tools import Tool
 from langchain_core.callbacks import BaseCallbackHandler
 
-from langchain.agents import AgentExecutor, create_tool_calling_agent
+from langchain.agents import AgentExecutor, create_tool_calling_agent, create_react_agent
+from langchain import hub
 from langchain.tools import tool
 
 # Persistent chat history (community in 0.2.x+)
@@ -37,7 +38,7 @@ from langchain_community.chat_message_histories import SQLChatMessageHistory
 from langchain_openai import ChatOpenAI           # OpenAI + Grok (OpenAI-compatible)
 from langchain_anthropic import ChatAnthropic     # Anthropic
 from langchain_groq import ChatGroq               # Groq
-from langchain_community.chat_models import ChatOllama  # Ollama local server
+from langchain_ollama import ChatOllama  # Ollama local server (supports bind_tools)
 
 # Optional Tavily search tool (latest location in community pkg)
 try:
@@ -180,23 +181,34 @@ def build_tools() -> List[Tool]:
 def build_agent(llm, tools: List[Tool]) -> AgentExecutor:
     """
     Tool-calling agent for LangChain 0.2.x+:
-    Uses the model's native tool-calling API instead of text-based ReAct parsing,
-    which is more reliable for modern models like Claude and GPT-4.
+    Uses the model's native tool-calling API when supported; falls back to
+    ReAct (text-based) agent for models that don't implement bind_tools
+    (e.g. older Ollama models).
     """
     system_text = (
         "You are ChatBox, an enterprise-ready assistant.\n"
         "Be concise, correct, and use tools when helpful."
     )
 
-    prompt = ChatPromptTemplate.from_messages([
-        ("system", system_text),
-        MessagesPlaceholder(variable_name="chat_history"),
-        ("human", "{input}"),
-        MessagesPlaceholder(variable_name="agent_scratchpad"),  # list[BaseMessage]
-    ])
+    try:
+        # Verify the model supports bind_tools before committing to the agent type
+        llm.bind_tools(tools)
 
-    agent = create_tool_calling_agent(llm=llm, tools=tools, prompt=prompt)
-    return AgentExecutor(agent=agent, tools=tools, verbose=False)
+        prompt = ChatPromptTemplate.from_messages([
+            ("system", system_text),
+            MessagesPlaceholder(variable_name="chat_history"),
+            ("human", "{input}"),
+            MessagesPlaceholder(variable_name="agent_scratchpad"),  # list[BaseMessage]
+        ])
+
+        agent = create_tool_calling_agent(llm=llm, tools=tools, prompt=prompt)
+        return AgentExecutor(agent=agent, tools=tools, verbose=False)
+
+    except NotImplementedError:
+        # Fallback: ReAct agent for models without native tool-calling support
+        react_prompt = hub.pull("hwchase17/react-chat")
+        agent = create_react_agent(llm=llm, tools=tools, prompt=react_prompt)
+        return AgentExecutor(agent=agent, tools=tools, verbose=False, handle_parsing_errors=True)
 
 
 # --------------------------
